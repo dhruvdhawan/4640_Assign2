@@ -9,9 +9,6 @@
         name: 
           - mysql-server
           - python3-pymysql
-          - bind9-utils
-          - tcpdump
-          - nmap
           - mysql-client
         state: present
       become: true
@@ -62,6 +59,7 @@
         login_user: root
         login_password: "bcit1995"
         check_implicit_admin: true
+        host: '{{ hostvars[inventory_hostname].priv_backend_ip_address }}'
         login_unix_socket: /var/run/mysqld/mysqld.sock
 
     - name: Create table for app
@@ -95,6 +93,12 @@
         login_password: "bcit1995"
         login_unix_socket: /var/run/mysqld/mysqld.sock
 
+    - name: Restart MySQL service
+      become: yes
+      service:
+        name: mysql
+        state: restarted
+
 - name: Configuration of Backend App Server
   hosts: backend
   become: true
@@ -110,9 +114,6 @@
         - pkg-config
         - python3-dev
         - python3-pip
-        - bind9-utils
-        - tcpdump
-        - nmap
         - mysql-client
       become: true
 
@@ -155,14 +156,6 @@
         state: present
         extra_args: "--break-system-packages"
 
-    - name: Install Python dependency packages
-      pip:
-        chdir: /a02/app
-        requirements: /home/a02/app/requirements.txt
-        state: present
-        extra_args: "--user --break-system-packages"
-        umask: "0022"
-
     - name: Set ownership and permissions for gunicorn executable
       file:
         path: /usr/local/bin/gunicorn
@@ -187,25 +180,15 @@
         src: templates/backend.service.j2 
         dest: /etc/systemd/system/backend.service
 
-    - name: Enable backend service
-      systemd:
-        name: backend
-        enabled: yes
-
-    - name: Start backend service
-      systemd:
-        name: backend
-        state: started
-
-    - name: Reload systemd daemon
-      systemd:
-        daemon_reload: yes
-
     - name: Start and enable application backend service
       service:
         name: backend
         state: started
         enabled: yes
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
 
 - name: Setting up the application
   hosts: web
@@ -219,23 +202,12 @@
       with_items:
         - git
         - nginx
-        - bind9-utils
-        - tcpdump
-        - nmap
-        - mysql-client
       become: true
 
     - name: Clone the repository
       git:
         repo: https://github.com/timoguic/acit4640-py-mysql.git
         dest: acit4640-py-mysql
-
-    - name: Change file ownership, group and permissions
-      file:
-        path: acit4640-py-mysql/frontend
-        owner: www-data
-        group: www-data
-        mode: '0777'
 
     - name: Change file ownership, group and permissions
       file:
@@ -262,3 +234,8 @@
         state: restarted
         enabled: true
       become: true
+
+    - name: Reload Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded

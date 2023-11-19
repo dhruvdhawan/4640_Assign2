@@ -1,3 +1,4 @@
+#COnfigure Provider
 terraform {
   required_providers {
     aws = {
@@ -12,7 +13,7 @@ terraform {
   required_version = ">= 1.3.0"
 }
 
-# Define Variables the values are outside this file 
+#Variables
 variable "aws_region" {
   description = "AWS region"
   default     = "us-west-2"
@@ -62,13 +63,14 @@ variable "ami_id" {
 
 variable "ssh_key_name"{
   description = "AWS SSH key name"
-  default = "my_key.pem"
+  default = "acit_4640"
 }
 
 provider "aws" {
   region = var.aws_region
 }
 
+#vpc
 resource "aws_vpc" "a02_vpc" {
   cidr_block       = var.vpc_cidr
   instance_tenancy = "default"
@@ -79,6 +81,7 @@ resource "aws_vpc" "a02_vpc" {
   }
 }
 
+#private subnet
 resource "aws_subnet" "a02_priv_subnet" {
   vpc_id                  = aws_vpc.a02_vpc.id
   cidr_block              = var.priv_subnet_cidr
@@ -90,6 +93,7 @@ resource "aws_subnet" "a02_priv_subnet" {
   }
 }
 
+#public subnet
 resource "aws_subnet" "a02_pub_subnet" {
   vpc_id                  = aws_vpc.a02_vpc.id
   cidr_block              = var.pub_subnet_cidr
@@ -101,6 +105,7 @@ resource "aws_subnet" "a02_pub_subnet" {
   }
 }
 
+#internet gateway
 resource "aws_internet_gateway" "a02_internet_gateway" {
   vpc_id = aws_vpc.a02_vpc.id
   tags = {
@@ -109,6 +114,7 @@ resource "aws_internet_gateway" "a02_internet_gateway" {
   }
 }
 
+#route table
 resource "aws_route_table" "a02_route_table" {
   vpc_id = aws_vpc.a02_vpc.id
 
@@ -133,9 +139,10 @@ resource "aws_route_table_association" "web_rt_assoc_priv" {
   route_table_id = aws_route_table.a02_route_table.id
 }
 
+#private security group
 resource "aws_security_group" "a02_priv_sg" {
   name        = "a02_priv_sg"
-  description = "Allow http and ssh access to ec2 from home and bcit and allow all traffic from a02_pub_sg"
+  description = "Allow ssh access to ec2 from home and bcit and allow all traffic from a02_pub_sg"
   vpc_id      = aws_vpc.a02_vpc.id
 }
 
@@ -173,9 +180,10 @@ resource "aws_vpc_security_group_ingress_rule" "priv_ssh_bcit_rule" {
   }
 }
 
+#public security group
 resource "aws_security_group" "a02_pub_sg" {
   name        = "a02_pub_sg"
-  description = "Allow http and ssh access to ec2 from home and bcit and allow all traffic from a02_priv_sg"
+  description = "Allow ssh and http access to ec2 from home and bcit and allow all traffic from a02_priv_sg"
   vpc_id      = aws_vpc.a02_vpc.id
 }
 
@@ -242,7 +250,6 @@ resource "aws_vpc_security_group_ingress_rule" "pub_allow_priv_rule" {
   ip_protocol       = "-1"
   from_port         = 0
   to_port           = 0
-  # cidr_ipv4         = var.home_net
   referenced_security_group_id = aws_security_group.a02_priv_sg.id
   description = "Allow all traffic from a02_priv_sg"
   tags = {
@@ -251,13 +258,11 @@ resource "aws_vpc_security_group_ingress_rule" "pub_allow_priv_rule" {
   }
 }
 
-
 resource "aws_vpc_security_group_ingress_rule" "priv_allow_pub_rule" {
   security_group_id = aws_security_group.a02_priv_sg.id
   ip_protocol       = "-1"
   from_port         = 0
   to_port           = 0
-  # cidr_ipv4         = var.home_net
   referenced_security_group_id = aws_security_group.a02_pub_sg.id
   description = "Allow all traffic from a02_pub_sg"
   tags = {
@@ -266,6 +271,20 @@ resource "aws_vpc_security_group_ingress_rule" "priv_allow_pub_rule" {
   }
 }
 
+resource "aws_vpc_security_group_ingress_rule" "priv_allow_priv_rule" {
+  security_group_id = aws_security_group.a02_priv_sg.id
+  ip_protocol       = "-1"
+  from_port         = 0
+  to_port           = 0
+  referenced_security_group_id = aws_security_group.a02_priv_sg.id
+  description = "Allow all traffic from a02_priv_sg"
+  tags = {
+    Name    = "a02_priv_sg"
+    Project = var.project_name
+  }
+}
+
+#backend instance
 resource "aws_instance" "a02_backend" {
   ami             = var.ami_id
   instance_type   = "t2.micro"
@@ -280,6 +299,7 @@ resource "aws_instance" "a02_backend" {
   }
 }
 
+#db instance
 resource "aws_instance" "a02_db" {
   ami             = var.ami_id
   instance_type   = "t2.micro"
@@ -294,6 +314,7 @@ resource "aws_instance" "a02_db" {
   }
 }
 
+#web instance
 resource "aws_instance" "a02_web" {
   ami             = var.ami_id
   instance_type   = "t2.micro"
@@ -308,6 +329,7 @@ resource "aws_instance" "a02_web" {
   }
 }
 
+#saving variables for ansible to use
 resource "local_file" "webservers" {
 
   content = <<EOF
@@ -334,59 +356,3 @@ EOF
   filename = "../service/inventory/webservers.yml"
 
 }
-
-# resource "local_file" "web" {
-
-#   content = <<EOF
-# webservers:
-#   hosts:
-#     ${aws_instance.a02_web.public_dns}
-# EOF
-
-#   filename = "../service/inventory/web.yml"
-
-# }
-
-# resource "local_file" "db" {
-
-#   content = <<EOF
-# webservers:
-#   hosts:
-#     ${aws_instance.a02_db.public_dns}
-# EOF
-
-#   filename = "../service/inventory/db.yml"
-
-# }
-
-# resource "local_file" "inventory_file" {
-#   content = templatefile("${path.module}/templates/inventory.tpl", {
-#     backend_instance_dns = aws_instance.a02_backend.public_dns
-#     web_instance_dns = aws_instance.a02_web.public_dns
-#     backend_instance_dns = aws_instance.a02_backend.public_dns
-#   })
-
-#   filename = "../service/inventory/ec2_inventory.yml"
-# }
-
-# # https://registry.terraform.io/providers/hashicorp/local/latest/docs/resources/file
-# resource "local_file" "backend_file" {
-
-#   content = <<EOF
-# ec2_instance_public_dns: ${aws_instance.a02_backend.public_dns}
-# EOF
-
-#   filename = "backend_file.yml"
-
-# }
-
-# # https://registry.terraform.io/providers/hashicorp/local/latest/docs/resources/file
-# resource "local_file" "script_file" {
-
-#   content = <<EOF
-# ec2_instance_id="${aws_instance.a02_backend.id}"
-# EOF
-
-#   filename = "backend_script.sh"
-
-# }
