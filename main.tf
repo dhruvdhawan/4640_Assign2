@@ -62,7 +62,7 @@ variable "ami_id" {
 
 variable "ssh_key_name"{
   description = "AWS SSH key name"
-  default = "acit_4640"
+  default = "my_key.pem"
 }
 
 provider "aws" {
