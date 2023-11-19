@@ -63,7 +63,7 @@ variable "ami_id" {
 
 variable "ssh_key_name"{
   description = "AWS SSH key name"
-  default = "4640"
+  default = "acit_4640"
 }
 
 provider "aws" {
@@ -353,6 +353,6 @@ db:
     ${aws_instance.a02_db.public_dns}
 EOF
 
-  filename = "../service/inventory/webservers.yml"
+  filename = "../ansible/webservers.yml"
 
 }
