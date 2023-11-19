@@ -1,0 +1,264 @@
+---
+- name: Installation and Configuration of Database Server
+  hosts: db
+  become: yes
+  tasks:
+    - name: Install mysql-server and python3-pymysql
+      package:
+        update_cache: true
+        name: 
+          - mysql-server
+          - python3-pymysql
+          - bind9-utils
+          - tcpdump
+          - nmap
+          - mysql-client
+        state: present
+      become: true
+
+    - name: Configure MySQL to listen to a private IP
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^bind-address'
+        line: 'bind-address = {{ hostvars[inventory_hostname].priv_db_ip_address }}' # Replace with the private IP
+
+    - name: Start and enable MySQL service
+      service:
+        name: mysql
+        state: started
+        enabled: yes
+
+    - name: Set root user password
+      community.mysql.mysql_user:
+        name: root
+        password: "bcit1995"
+        login_user: root
+        login_password: "password"
+        check_implicit_admin: true
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        state: present
+
+    - name: Delete unnamed user and test database
+      community.mysql.mysql_db:
+        name: test
+        state: absent
+        login_user: root
+        login_password: "bcit1995"
+        check_implicit_admin: true
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Create application database
+      community.mysql.mysql_db:
+        name: backend
+        login_user: root
+        login_password: "bcit1995"
+        check_implicit_admin: true
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Create application user and table for the app
+      community.mysql.mysql_user:
+        name: a02
+        password: secure
+        login_user: root
+        login_password: "bcit1995"
+        check_implicit_admin: true
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Create table for app
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "bcit1995"
+        login_db: backend
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: |
+          CREATE TABLE IF NOT EXISTS item (
+            name varchar(30) NOT NULL,
+            bcit_id varchar(10) NOT NULL,
+            PRIMARY KEY (bcit_id)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+    - name: Add initial data to app
+      community.mysql.mysql_query:
+        login_user: root
+        login_password: "bcit1995"
+        login_db: backend
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "INSERT INTO item (name, bcit_id) VALUES ('Goutam', 'A01283117');"
+
+    - name: Grant all privileges to a user for a specific database
+      community.mysql.mysql_user:
+        name: a02
+        host: '{{ hostvars[inventory_hostname].priv_backend_ip_address }}'
+        priv: "backend.*:ALL"
+        state: present
+        login_user: root
+        login_password: "bcit1995"
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+- name: Configuration of Backend App Server
+  hosts: backend
+  become: true
+  tasks:
+    - name: Install required packages
+      package:
+        update_cache: true
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - git
+        - libmysqlclient-dev
+        - pkg-config
+        - python3-dev
+        - python3-pip
+        - bind9-utils
+        - tcpdump
+        - nmap
+        - mysql-client
+      become: true
+
+    - name: Create OS user
+      user:
+        name: a02
+        state: present
+        shell: /bin/bash
+
+    - name: Create backend application directory
+      file:
+        path: /a02/app
+        state: directory
+        owner: a02
+        group: a02
+
+    - name: Clone the repository
+      git:
+        repo: https://github.com/timoguic/acit4640-py-mysql.git
+        dest: acit4640-py-mysql
+
+    - name: Copy file with owner
+      copy:
+        src: acit4640-py-mysql/backend/
+        dest: /home/a02/app
+        owner: a02
+        group: a02
+        mode: '777'
+        remote_src: yes
+
+    - name: Change ownership recursively
+      become: yes
+      become_user: root
+      ansible.builtin.command:
+        cmd: chown -R a02 /a02/app 
+
+    - name: Install Python dependency packages
+      pip:
+        requirements: /home/a02/app/requirements.txt
+        state: present
+        extra_args: "--break-system-packages"
+
+    - name: Install Python dependency packages
+      pip:
+        chdir: /a02/app
+        requirements: /home/a02/app/requirements.txt
+        state: present
+        extra_args: "--user --break-system-packages"
+        umask: "0022"
+
+    - name: Set ownership and permissions for gunicorn executable
+      file:
+        path: /usr/local/bin/gunicorn
+        owner: a02
+        group: a02
+        mode: '0755'
+
+    - name: Replace MYSQL_HOST in backend.conf
+      lineinfile:
+        path: /home/a02/app/backend.conf
+        regexp: '^MYSQL_HOST = '
+        line: 'MYSQL_HOST = {{ hostvars[inventory_hostname].priv_db_ip_address }}'
+
+    - name: Replace MYSQL_USER in backend.conf
+      lineinfile:
+        path: /home/a02/app/backend.conf
+        regexp: '^MYSQL_USER = '
+        line: 'MYSQL_USER = a02'    
+
+    - name: Create backend.service file
+      template:
+        src: templates/backend.service.j2 
+        dest: /etc/systemd/system/backend.service
+
+    - name: Enable backend service
+      systemd:
+        name: backend
+        enabled: yes
+
+    - name: Start backend service
+      systemd:
+        name: backend
+        state: started
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Start and enable application backend service
+      service:
+        name: backend
+        state: started
+        enabled: yes
+
+- name: Setting up the application
+  hosts: web
+  become: yes
+  tasks:
+    - name: Install required packages
+      package:
+        update_cache: true
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - git
+        - nginx
+        - bind9-utils
+        - tcpdump
+        - nmap
+        - mysql-client
+      become: true
+
+    - name: Clone the repository
+      git:
+        repo: https://github.com/timoguic/acit4640-py-mysql.git
+        dest: acit4640-py-mysql
+
+    - name: Change file ownership, group and permissions
+      file:
+        path: acit4640-py-mysql/frontend
+        owner: www-data
+        group: www-data
+        mode: '0777'
+
+    - name: Change file ownership, group and permissions
+      file:
+        path: acit4640-py-mysql/frontend/index.html
+        owner: www-data
+        group: www-data
+        mode: '0777'
+
+    - name: Copy file with owner
+      copy:
+        src: /home/ubuntu/acit4640-py-mysql/frontend/index.html
+        dest: /var/www/html/index.html
+        remote_src: yes
+
+    - name: configure nginx site
+      ansible.builtin.template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/sites-available/default
+      become: true
+
+    - name: enable and restart nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
+        enabled: true
+      become: true
